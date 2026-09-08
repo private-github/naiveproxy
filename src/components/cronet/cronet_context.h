@@ -435,6 +435,11 @@ class CronetContext {
 
   const int default_load_flags_;
 
+  // cronet-go extension: proxy rules for the engine (may be empty).
+  // Must be declared before |network_tasks_|, which is initialized with a
+  // moved-from |context_config|.
+  const std::string proxy_rules_;
+
   // File thread should be destroyed last.
   std::unique_ptr<base::Thread> file_thread_;
 

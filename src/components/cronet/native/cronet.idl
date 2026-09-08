@@ -619,6 +619,12 @@ struct EngineParams {
    * should be verified.
    */
   bool skip_cert_verify = false;
+
+  /**
+   * Proxy rules applied to every request of this engine, e.g.
+   * "http://proxy-host:proxy-port". cronet-go extension.
+   */
+  string proxy_rules;
 };
 
 /**

@@ -136,6 +136,11 @@ struct URLRequestContextConfig {
   // Certificate verifier for testing.
   std::unique_ptr<net::CertVerifier> mock_cert_verifier;
 
+  // cronet-go extension: proxy rules applied to every request of this
+  // engine (e.g. "http://proxy-host:proxy-port"). Empty means the default
+  // proxy resolution is used.
+  std::string proxy_rules;
+
   // Enable Network Quality Estimator (NQE).
   const bool enable_network_quality_estimator;
 

@@ -353,6 +353,7 @@ Cronet_RESULT Cronet_EngineImpl::StartWithParams(
   }
   std::unique_ptr<URLRequestContextConfig> config =
       context_config_builder.Build();
+  config->proxy_rules = params->proxy_rules;
 
   // Set custom dialer if provided.
   if (dialer_) {

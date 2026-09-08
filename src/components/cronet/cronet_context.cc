@@ -63,6 +63,8 @@
 #include "net/net_buildflags.h"
 #include "net/nqe/network_quality_estimator_params.h"
 #include "net/proxy_resolution/configured_proxy_resolution_service.h"
+#include "net/proxy_resolution/proxy_config_service.h"
+#include "net/proxy_resolution/proxy_config_with_annotation.h"
 #include "net/proxy_resolution/proxy_config_service_fixed.h"
 #include "net/proxy_resolution/proxy_resolution_service.h"
 #include "net/third_party/quiche/src/quiche/quic/core/quic_versions.h"
@@ -222,6 +224,7 @@ CronetContext::CronetContext(
           (context_config->load_disable_cache ? net::LOAD_DISABLE_CACHE : 0) |
           (context_config->enable_brotli ? net::LOAD_CAN_USE_SHARED_DICTIONARY
                                          : 0)),
+      proxy_rules_(context_config->proxy_rules),
       network_tasks_(
           new NetworkTasks(std::move(context_config), std::move(callback))),
       network_task_runner_(network_task_runner) {
@@ -267,12 +270,47 @@ CronetContext::NetworkTasks::~NetworkTasks() {
     net::NetworkChangeNotifier::RemoveNetworkObserver(this);
 }
 
+namespace {
+
+// cronet-go extension: a ProxyConfigService serving a fixed set of proxy
+// rules configured through the engine's proxy_rules parameter.
+class ProxyConfigServiceCustom : public net::ProxyConfigService {
+ public:
+  explicit ProxyConfigServiceCustom(const std::string& proxy_rules)
+      : proxy_rules_(proxy_rules) {}
+
+  // ProxyConfigService:
+  void AddObserver(Observer* observer) override {}
+  void RemoveObserver(Observer* observer) override {}
+  ConfigAvailability GetLatestProxyConfig(
+      net::ProxyConfigWithAnnotation* config) override {
+    net::ProxyConfig proxy_config;
+    proxy_config.proxy_rules().ParseFromString(proxy_rules_);
+    net::NetworkTrafficAnnotationTag annotation =
+        net::DefineNetworkTrafficAnnotation("cronet_go_proxy_rules",
+                                            "cronet-go engine proxy rules");
+    *config = net::ProxyConfigWithAnnotation(proxy_config, annotation);
+    return CONFIG_VALID;
+  }
+
+ private:
+  const std::string proxy_rules_;
+};
+
+}  // namespace
+
 void CronetContext::InitRequestContextOnInitThread() {
   DCHECK(OnInitThread());
   // Cannot create this inside Initialize because Android requires this to be
   // created on the JNI thread.
-  auto proxy_config_service =
-      cronet::CreateProxyConfigService(GetNetworkTaskRunner());
+  std::unique_ptr<net::ProxyConfigService> proxy_config_service;
+  if (!proxy_rules_.empty()) {
+    proxy_config_service =
+        std::make_unique<ProxyConfigServiceCustom>(proxy_rules_);
+  } else {
+    proxy_config_service =
+        cronet::CreateProxyConfigService(GetNetworkTaskRunner());
+  }
   GetNetLog().EnsureInitializedOnInitThread();
   GetNetworkTaskRunner()->PostTask(
       FROM_HERE,

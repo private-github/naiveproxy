@@ -336,6 +336,12 @@ void Cronet_EngineParams_skip_cert_verify_set(
   self->skip_cert_verify = skip_cert_verify;
 }
 
+void Cronet_EngineParams_proxy_rules_set(Cronet_EngineParamsPtr self,
+                                         const Cronet_String proxy_rules) {
+  DCHECK(self);
+  self->proxy_rules = proxy_rules;
+}
+
 // Struct Cronet_EngineParams getters.
 bool Cronet_EngineParams_enable_check_result_get(
     const Cronet_EngineParamsPtr self) {
@@ -442,6 +448,12 @@ bool Cronet_EngineParams_skip_cert_verify_get(
     const Cronet_EngineParamsPtr self) {
   DCHECK(self);
   return self->skip_cert_verify;
+}
+
+Cronet_String Cronet_EngineParams_proxy_rules_get(
+    const Cronet_EngineParamsPtr self) {
+  DCHECK(self);
+  return self->proxy_rules.c_str();
 }
 
 // Struct Cronet_HttpHeader.

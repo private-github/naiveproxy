@@ -96,6 +96,7 @@ struct Cronet_EngineParams {
   double network_thread_priority = std::numeric_limits<double>::quiet_NaN();
   std::string experimental_options;
   bool skip_cert_verify = false;
+  std::string proxy_rules;
 };
 
 // Struct Cronet_HttpHeader.

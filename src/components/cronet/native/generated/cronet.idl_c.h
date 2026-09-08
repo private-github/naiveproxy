@@ -841,6 +841,9 @@ CRONET_EXPORT
 void Cronet_EngineParams_skip_cert_verify_set(
     Cronet_EngineParamsPtr self,
     const bool skip_cert_verify);
+CRONET_EXPORT
+void Cronet_EngineParams_proxy_rules_set(Cronet_EngineParamsPtr self,
+                                         const Cronet_String proxy_rules);
 // Cronet_EngineParams getters.
 CRONET_EXPORT
 bool Cronet_EngineParams_enable_check_result_get(
@@ -894,6 +897,9 @@ Cronet_String Cronet_EngineParams_experimental_options_get(
     const Cronet_EngineParamsPtr self);
 CRONET_EXPORT
 bool Cronet_EngineParams_skip_cert_verify_get(
+    const Cronet_EngineParamsPtr self);
+CRONET_EXPORT
+Cronet_String Cronet_EngineParams_proxy_rules_get(
     const Cronet_EngineParamsPtr self);
 
 ///////////////////////
