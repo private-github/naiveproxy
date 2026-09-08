@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <memory>
+#include <set>
 #include <type_traits>
 #include <utility>
 
@@ -43,6 +44,7 @@
 #include "net/socket/client_socket_pool_manager.h"
 #include "net/socket/custom_client_socket_factory.h"
 #include "net/socket/ssl_client_socket.h"
+#include "net/ssl/ssl_config_service_defaults.h"
 #include "net/ssl/ssl_key_logger_impl.h"
 #include "net/third_party/quiche/src/quiche/http2/core/spdy_protocol.h"
 #include "net/third_party/quiche/src/quiche/quic/core/crypto/crypto_protocol.h"
@@ -50,6 +52,7 @@
 #include "net/third_party/quiche/src/quiche/quic/core/quic_tag.h"
 #include "net/third_party/quiche/src/quiche/quic/core/quic_types.h"
 #include "net/url_request/url_request_context_builder.h"
+#include "third_party/boringssl/src/include/openssl/ssl.h"
 #include "url/origin.h"
 
 #if BUILDFLAG(ENABLE_REPORTING)
@@ -295,6 +298,45 @@ auto map(std::optional<T> maybe, F&& f) {
     return std::optional<std::invoke_result_t<F, T>>();
   return std::optional<std::invoke_result_t<F, T>>(f(maybe.value()));
 }
+
+// Maps a named group string (as used in the "tls_curves" experimental
+// option) to its TLS named group codepoint. Returns 0 if unknown.
+uint16_t NamedGroupFromName(const std::string& name) {
+  if (name == "X25519MLKEM768")
+    return 0x4588;  // SSL_GROUP_X25519_MLKEM768
+  if (name == "X25519")
+    return 0x001D;  // SSL_GROUP_X25519
+  if (name == "P-256" || name == "secp256r1")
+    return 0x0017;  // SSL_GROUP_SECP256R1
+  if (name == "P-384" || name == "secp384r1")
+    return 0x0018;  // SSL_GROUP_SECP384R1
+  if (name == "P-521" || name == "secp521r1")
+    return 0x0019;  // SSL_GROUP_SECP521R1
+  return 0;
+}
+
+bool IsTls13CipherSuite(uint16_t id) {
+  return id >= 0x1301 && id <= 0x1308;
+}
+
+// An SSLConfigService that serves a fixed SSLContextConfig. Used to apply
+// the "tls_curves" and "tls_cipher_suites" experimental options, which
+// override the process-default TLS fingerprint (supported_groups /
+// key_share ordering and enabled TLS 1.2 cipher suites).
+class CustomSSLContextConfigService : public net::SSLConfigServiceDefaults {
+ public:
+  explicit CustomSSLContextConfigService(net::SSLContextConfig config)
+      : config_(std::move(config)) {}
+
+  CustomSSLContextConfigService(const CustomSSLContextConfigService&) = delete;
+  CustomSSLContextConfigService& operator=(
+      const CustomSSLContextConfigService&) = delete;
+
+  net::SSLContextConfig GetSSLContextConfig() override { return config_; }
+
+ private:
+  const net::SSLContextConfig config_;
+};
 
 }  // namespace
 
@@ -1073,6 +1115,100 @@ void URLRequestContextConfig::ConfigureURLRequestContextBuilder(
 
   SetContextBuilderExperimentalOptions(context_builder, &session_params,
                                        quic_context->params(), bound_network);
+
+  // cronet-go extension: the "tls_curves" and "tls_cipher_suites"
+  // experimental options override the TLS fingerprint of this engine.
+  // - "tls_curves": ordered named groups used for the supported_groups and
+  //   key_share extensions. Key shares are advertised for the first two
+  //   groups, matching Chromium's default policy.
+  // - "tls_cipher_suites": allowlist of TLS 1.2 cipher suite names. Every
+  //   suite enabled by BoringSSL's default policy that is not on the list is
+  //   disabled. TLS 1.3 suites are always enabled by BoringSSL and cannot be
+  //   configured; the special name "TLS_GREASE" needs no configuration
+  //   because GREASE is injected into the ClientHello automatically.
+  {
+    const base::ListValue* curves =
+        effective_experimental_options.FindList("tls_curves");
+    const base::ListValue* ciphers =
+        effective_experimental_options.FindList("tls_cipher_suites");
+    if (curves || ciphers) {
+      net::SSLContextConfig ssl_context_config =
+          net::SSLConfigServiceDefaults().GetSSLContextConfig();
+      if (curves) {
+        std::vector<net::SSLNamedGroupInfo> named_groups;
+        for (const base::Value& item : *curves) {
+          const std::string* name = item.GetIfString();
+          if (!name) {
+            continue;
+          }
+          const uint16_t group_id = NamedGroupFromName(*name);
+          if (group_id == 0) {
+            LOG(ERROR) << "Unknown TLS named group: " << *name;
+            continue;
+          }
+          named_groups.push_back(
+              {.group_id = group_id,
+               .send_key_share = named_groups.size() < 2});
+        }
+        if (!named_groups.empty()) {
+          ssl_context_config.supported_named_groups = std::move(named_groups);
+        }
+      }
+      if (ciphers) {
+        // Build the requested set of cipher suite IDs. BoringSSL has no
+        // name-based cipher lookup, so scan the full 16-bit cipher suite
+        // value space once and match against both the IANA standard names
+        // and the OpenSSL-style names.
+        std::set<std::string> requested_names;
+        for (const base::Value& item : *ciphers) {
+          const std::string* name = item.GetIfString();
+          if (!name || *name == "TLS_GREASE") {
+            // GREASE is injected into the ClientHello automatically.
+            continue;
+          }
+          requested_names.insert(*name);
+        }
+        if (!requested_names.empty()) {
+          std::set<uint16_t> requested;
+          std::vector<uint16_t> known;
+          for (uint32_t value = 0; value <= 0xFFFF; ++value) {
+            const SSL_CIPHER* cipher =
+                SSL_get_cipher_by_value(static_cast<uint16_t>(value));
+            if (!cipher) {
+              continue;
+            }
+            const uint16_t cipher_id = SSL_CIPHER_get_protocol_id(cipher);
+            if (IsTls13CipherSuite(cipher_id)) {
+              continue;
+            }
+            known.push_back(cipher_id);
+            const char* standard_name = SSL_CIPHER_standard_name(cipher);
+            const char* openssl_name = SSL_CIPHER_get_name(cipher);
+            if ((standard_name && requested_names.count(standard_name)) ||
+                (openssl_name && requested_names.count(openssl_name))) {
+              requested.insert(cipher_id);
+            }
+          }
+          LOG_IF(ERROR, requested.size() != requested_names.size())
+              << "Some requested TLS cipher suites were not recognized";
+          if (!requested.empty()) {
+            // Disable every suite enabled by BoringSSL's default policy
+            // that is not on the requested allowlist.
+            std::vector<uint16_t> disabled;
+            for (uint16_t id : known) {
+              if (requested.count(id) == 0) {
+                disabled.push_back(id);
+              }
+            }
+            ssl_context_config.disabled_cipher_suites = std::move(disabled);
+          }
+        }
+      }
+      context_builder->set_ssl_config_service(
+          std::make_unique<CustomSSLContextConfigService>(
+              std::move(ssl_context_config)));
+    }
+  }
 
   context_builder->set_http_network_session_params(session_params);
   context_builder->set_quic_context(std::move(quic_context));
