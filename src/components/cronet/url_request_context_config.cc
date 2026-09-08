@@ -300,18 +300,18 @@ auto map(std::optional<T> maybe, F&& f) {
 }
 
 // Maps a named group string (as used in the "tls_curves" experimental
-// option) to its TLS named group codepoint. Returns 0 if unknown.
+// option) to its group codepoint. Returns 0 if unknown.
 uint16_t NamedGroupFromName(const std::string& name) {
   if (name == "X25519MLKEM768")
-    return 0x4588;  // SSL_GROUP_X25519_MLKEM768
+    return SSL_GROUP_X25519_MLKEM768;
   if (name == "X25519")
-    return 0x001D;  // SSL_GROUP_X25519
+    return SSL_GROUP_X25519;
   if (name == "P-256" || name == "secp256r1")
-    return 0x0017;  // SSL_GROUP_SECP256R1
+    return SSL_GROUP_SECP256R1;
   if (name == "P-384" || name == "secp384r1")
-    return 0x0018;  // SSL_GROUP_SECP384R1
+    return SSL_GROUP_SECP384R1;
   if (name == "P-521" || name == "secp521r1")
-    return 0x0019;  // SSL_GROUP_SECP521R1
+    return SSL_GROUP_SECP521R1;
   return 0;
 }
 
