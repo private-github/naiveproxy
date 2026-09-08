@@ -27,6 +27,7 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/notreached.h"
 #include "base/rand_util.h"
+#include "base/strings/string_printf.h"
 #include "base/strings/string_util.h"
 #include "base/strings/string_view_util.h"
 #include "base/synchronization/lock.h"
@@ -692,12 +693,26 @@ int SSLClientSocketImpl::Init() {
 
   const std::vector<uint16_t> supported_groups =
       context_->config().GetSupportedGroups();
+  // Temporary cronet-go diagnostic: log the effective group configuration.
+  {
+    std::string ids;
+    for (uint16_t g : supported_groups)
+      ids += base::StringPrintf(" 0x%04X", g);
+    LOG(ERROR) << "[cronet-go] Init supported_groups(" << ids << ")";
+  }
   if (!SSL_set1_group_ids(ssl_.get(), supported_groups.data(),
                           supported_groups.size())) {
     return ERR_UNEXPECTED;
   }
   const std::vector<uint16_t> key_shares =
       context_->config().GetSupportedGroups(/*key_shares_only=*/true);
+  // Temporary cronet-go diagnostic: log the effective key shares.
+  {
+    std::string ids;
+    for (uint16_t g : key_shares)
+      ids += base::StringPrintf(" 0x%04X", g);
+    LOG(ERROR) << "[cronet-go] Init key_shares(" << ids << ")";
+  }
   if (!key_shares.empty() &&
       !SSL_set1_client_key_shares(ssl_.get(), key_shares.data(),
                                   key_shares.size())) {
