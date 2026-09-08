@@ -284,6 +284,8 @@ class ProxyConfigServiceCustom : public net::ProxyConfigService {
   void RemoveObserver(Observer* observer) override {}
   ConfigAvailability GetLatestProxyConfig(
       net::ProxyConfigWithAnnotation* config) override {
+    LOG(ERROR) << "[cronet-go] ProxyConfigServiceCustom consulted, rules='"
+               << proxy_rules_ << "'";
     net::ProxyConfig proxy_config;
     proxy_config.proxy_rules().ParseFromString(proxy_rules_);
     net::NetworkTrafficAnnotationTag annotation =
