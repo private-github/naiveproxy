@@ -332,7 +332,14 @@ class CustomSSLContextConfigService : public net::SSLConfigServiceDefaults {
   CustomSSLContextConfigService& operator=(
       const CustomSSLContextConfigService&) = delete;
 
-  net::SSLContextConfig GetSSLContextConfig() override { return config_; }
+  net::SSLContextConfig GetSSLContextConfig() override {
+    // Temporary diagnostic: confirm this service is actually consulted.
+    LOG(ERROR) << "[cronet-go] CustomSSLContextConfigService consulted: groups="
+               << config_.supported_named_groups.size()
+               << " disabled_ciphers="
+               << config_.disabled_cipher_suites.size();
+    return config_;
+  }
 
  private:
   const net::SSLContextConfig config_;
@@ -1127,10 +1134,19 @@ void URLRequestContextConfig::ConfigureURLRequestContextBuilder(
   // keys can be removed from the dict (otherwise the generic parser warns
   // about unknown options).
   {
-    const base::ListValue* curves =
-        effective_experimental_options.FindList("tls_curves");
-    const base::ListValue* ciphers =
-        effective_experimental_options.FindList("tls_cipher_suites");
+    // Clone the lists before removing the keys: Remove() mutates the dict
+    // storage and would invalidate the returned pointers.
+    std::optional<base::ListValue> curves;
+    std::optional<base::ListValue> ciphers;
+    if (const base::ListValue* found =
+            effective_experimental_options.FindList("tls_curves")) {
+      curves = found->Clone();
+    }
+    if (const base::ListValue* found =
+            effective_experimental_options.FindList("tls_cipher_suites")) {
+      ciphers = found->Clone();
+    }
+    // Consume the keys so the generic parser does not warn about them.
     effective_experimental_options.Remove("tls_curves");
     effective_experimental_options.Remove("tls_cipher_suites");
     if (curves || ciphers) {
@@ -1145,7 +1161,7 @@ void URLRequestContextConfig::ConfigureURLRequestContextBuilder(
           }
           const uint16_t group_id = NamedGroupFromName(*name);
           if (group_id == 0) {
-            LOG(ERROR) << "Unknown TLS named group: " << *name;
+            LOG(ERROR) << "[cronet-go] unknown TLS named group: " << *name;
             continue;
           }
           named_groups.push_back(
