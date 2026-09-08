@@ -610,6 +610,15 @@ struct EngineParams {
    * JSON formatted experimental options to be used in Cronet Engine.
    */
   string experimental_options;
+
+  /**
+   * Accept every server certificate without validation.
+   *
+   * cronet-go extension: intended for connecting through trusted MITM
+   * proxies that re-sign traffic. Never enable it for connections that
+   * should be verified.
+   */
+  bool skip_cert_verify = false;
 };
 
 /**

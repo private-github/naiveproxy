@@ -837,6 +837,10 @@ CRONET_EXPORT
 void Cronet_EngineParams_experimental_options_set(
     Cronet_EngineParamsPtr self,
     const Cronet_String experimental_options);
+CRONET_EXPORT
+void Cronet_EngineParams_skip_cert_verify_set(
+    Cronet_EngineParamsPtr self,
+    const bool skip_cert_verify);
 // Cronet_EngineParams getters.
 CRONET_EXPORT
 bool Cronet_EngineParams_enable_check_result_get(
@@ -887,6 +891,9 @@ double Cronet_EngineParams_network_thread_priority_get(
     const Cronet_EngineParamsPtr self);
 CRONET_EXPORT
 Cronet_String Cronet_EngineParams_experimental_options_get(
+    const Cronet_EngineParamsPtr self);
+CRONET_EXPORT
+bool Cronet_EngineParams_skip_cert_verify_get(
     const Cronet_EngineParamsPtr self);
 
 ///////////////////////

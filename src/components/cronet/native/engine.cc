@@ -27,14 +27,18 @@
 #include "components/grpc_support/include/bidirectional_stream_c.h"
 #include "net/base/completion_once_callback.h"
 #include "net/base/hash_value.h"
+#include "net/base/net_errors.h"
 #include "net/base/proxy_delegate.h"
+#include "net/cert/cert_verifier.h"
 #include "net/cert/cert_verify_proc.h"
 #include "net/cert/cert_verify_proc_builtin.h"
+#include "net/cert/cert_verify_result.h"
 #include "net/cert/crl_set.h"
 #include "net/cert/ct_policy_enforcer.h"
 #include "net/cert/do_nothing_ct_verifier.h"
 #include "net/cert/internal/system_trust_store.h"
 #include "net/cert/multi_threaded_cert_verifier.h"
+#include "net/log/net_log_with_source.h"
 #include "net/cert/x509_certificate.h"
 #include "net/cert/x509_util.h"
 #include "third_party/boringssl/src/pki/cert_errors.h"
@@ -243,6 +247,46 @@ Cronet_EngineImpl::~Cronet_EngineImpl() {
   Shutdown();
 }
 
+namespace {
+
+// Accepts every server certificate without validation. Installed when the
+// engine is started with skip_cert_verify=true, e.g. to connect through a
+// trusted MITM proxy that re-signs traffic.
+class AlwaysOkCertVerifier : public net::CertVerifier {
+ public:
+  AlwaysOkCertVerifier() = default;
+  AlwaysOkCertVerifier(const AlwaysOkCertVerifier&) = delete;
+  AlwaysOkCertVerifier& operator=(const AlwaysOkCertVerifier&) = delete;
+  ~AlwaysOkCertVerifier() override = default;
+
+  // CertVerifier:
+  int Verify(const RequestParams& params,
+             net::CertVerifyResult* verify_result,
+             net::CompletionOnceCallback callback,
+             std::unique_ptr<Request>* out_req,
+             const net::NetLogWithSource& net_log) override {
+    *verify_result = net::CertVerifyResult();
+    verify_result->verified_cert = params.certificate();
+    return net::OK;
+  }
+
+  void Verify2QwacBinding(
+      const std::string& binding,
+      const std::string& hostname,
+      const scoped_refptr<net::X509Certificate>& tls_cert,
+      base::OnceCallback<void(const scoped_refptr<net::X509Certificate>&)>
+          callback,
+      const net::NetLogWithSource& net_log) override {
+    std::move(callback).Run(nullptr);
+  }
+
+  void SetConfig(const Config& config) override {}
+  void AddObserver(Observer* observer) override {}
+  void RemoveObserver(Observer* observer) override {}
+};
+
+}  // namespace
+
 Cronet_RESULT Cronet_EngineImpl::StartWithParams(
     Cronet_EngineParamsPtr params) {
   cronet::EnsureInitialized();
@@ -302,6 +346,11 @@ Cronet_RESULT Cronet_EngineImpl::StartWithParams(
 
   // MockCertVerifier to use for testing purposes.
   context_config_builder.mock_cert_verifier = std::move(mock_cert_verifier_);
+  if (params->skip_cert_verify &&
+      !context_config_builder.mock_cert_verifier) {
+    context_config_builder.mock_cert_verifier =
+        std::make_unique<AlwaysOkCertVerifier>();
+  }
   std::unique_ptr<URLRequestContextConfig> config =
       context_config_builder.Build();
 
