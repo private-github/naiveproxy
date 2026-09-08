@@ -1113,9 +1113,6 @@ void URLRequestContextConfig::ConfigureURLRequestContextBuilder(
     quic_context->params()->migrate_sessions_on_network_change_v2 = false;
   }
 
-  SetContextBuilderExperimentalOptions(context_builder, &session_params,
-                                       quic_context->params(), bound_network);
-
   // cronet-go extension: the "tls_curves" and "tls_cipher_suites"
   // experimental options override the TLS fingerprint of this engine.
   // - "tls_curves": ordered named groups used for the supported_groups and
@@ -1126,11 +1123,16 @@ void URLRequestContextConfig::ConfigureURLRequestContextBuilder(
   //   disabled. TLS 1.3 suites are always enabled by BoringSSL and cannot be
   //   configured; the special name "TLS_GREASE" needs no configuration
   //   because GREASE is injected into the ClientHello automatically.
+  // This must run before SetContextBuilderExperimentalOptions so the two
+  // keys can be removed from the dict (otherwise the generic parser warns
+  // about unknown options).
   {
     const base::ListValue* curves =
         effective_experimental_options.FindList("tls_curves");
     const base::ListValue* ciphers =
         effective_experimental_options.FindList("tls_cipher_suites");
+    effective_experimental_options.Remove("tls_curves");
+    effective_experimental_options.Remove("tls_cipher_suites");
     if (curves || ciphers) {
       net::SSLContextConfig ssl_context_config =
           net::SSLConfigServiceDefaults().GetSSLContextConfig();
@@ -1204,11 +1206,18 @@ void URLRequestContextConfig::ConfigureURLRequestContextBuilder(
           }
         }
       }
+      LOG(ERROR) << "[cronet-go] applying TLS fingerprint options: groups="
+                 << ssl_context_config.supported_named_groups.size()
+                 << " disabled_ciphers="
+                 << ssl_context_config.disabled_cipher_suites.size();
       context_builder->set_ssl_config_service(
           std::make_unique<CustomSSLContextConfigService>(
               std::move(ssl_context_config)));
     }
   }
+
+  SetContextBuilderExperimentalOptions(context_builder, &session_params,
+                                       quic_context->params(), bound_network);
 
   context_builder->set_http_network_session_params(session_params);
   context_builder->set_quic_context(std::move(quic_context));
