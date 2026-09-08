@@ -303,8 +303,14 @@ void CronetContext::InitRequestContextOnInitThread() {
   DCHECK(OnInitThread());
   // Cannot create this inside Initialize because Android requires this to be
   // created on the JNI thread.
-  auto proxy_config_service =
-      cronet::CreateProxyConfigService(GetNetworkTaskRunner());
+  std::unique_ptr<net::ProxyConfigService> proxy_config_service;
+  if (!proxy_rules_.empty()) {
+    // cronet-go extension: fixed proxy rules configured on the engine.
+    // Left null otherwise; BuildDefaultURLRequestContext then uses
+    // CreateDirect() (no system proxy monitoring resources).
+    proxy_config_service =
+        std::make_unique<ProxyConfigServiceCustom>(proxy_rules_);
+  }
   GetNetLog().EnsureInitializedOnInitThread();
   GetNetworkTaskRunner()->PostTask(
       FROM_HERE,
@@ -404,13 +410,13 @@ CronetContext::NetworkTasks::BuildDefaultURLRequestContext(
   context_config_->ConfigureURLRequestContextBuilder(&context_builder, this);
   SetSharedURLRequestContextBuilderConfig(&context_builder);
 
-  // cronet-go extension: install fixed proxy rules configured on the
-  // engine (ProxyConfigServiceCustom). Otherwise use a direct connection
-  // (no proxy). This avoids creating background resources from system
-  // proxy monitoring that can't be cleaned up.
-  if (!proxy_rules_.empty()) {
+  // cronet-go extension: honor a proxy_config_service created by
+  // InitRequestContextOnInitThread (engine proxy_rules). Otherwise use a
+  // direct connection (no proxy). This avoids creating background
+  // resources from system proxy monitoring that can't be cleaned up.
+  if (proxy_config_service) {
     context_builder.set_proxy_config_service(
-        std::make_unique<ProxyConfigServiceCustom>(proxy_rules_));
+        std::move(proxy_config_service));
   } else {
     context_builder.set_proxy_resolution_service(
         net::ConfiguredProxyResolutionService::CreateDirect());
